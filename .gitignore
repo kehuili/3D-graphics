@@ -1,5 +1,9 @@
+# others
+*.htm
+
 # Prerequisites
 *.d
+*.db
 
 # Compiled Object files
 *.slo
