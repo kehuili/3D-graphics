@@ -109,7 +109,9 @@ GzRender::GzRender(int xRes, int yRes)
 	yres = yRes;
 	framebuffer = (char*)malloc(3 * sizeof(char) * xRes * yRes);
 	pixelbuffer = (GzPixel*)malloc(sizeof(GzPixel) * xRes * yRes);
-
+	offsetX = 0;
+	offsetY = 0;
+	weight = 1;
 /* HW 3.6
 - setup Xsp and anything only done once 
 - init default camera 
@@ -265,12 +267,14 @@ int GzRender::GzPutCamera(GzCamera camera)
 	return GZ_SUCCESS;	
 }
 
-int GzRender::GzPushMatrix(GzMatrix	matrix)
+int GzRender::GzPushMatrix(GzMatrix	m)
 {
 /* HW 3.9 
 - push a matrix onto the Ximage stack
 - check for stack overflow
 */
+	GzMatrix matrix;
+	copyMatrix(m, matrix);
 	GzMatrix I = {
 		1.0, 0.0, 0.0, 0.0,
 		0.0, 1.0, 0.0, 0.0,
@@ -335,11 +339,14 @@ int GzRender::GzPut(int i, int j, GzIntensity r, GzIntensity g, GzIntensity b, G
 	r = inBound(MAXCOLOR, 0, r);
 	g = inBound(MAXCOLOR, 0, g);
 	b = inBound(MAXCOLOR, 0, b);
+	a = inBound(MAXCOLOR, 0, a);
+	z = inBound(INT_MAX, 0, z);
 
 	pixelbuffer[j * xres + i].red = r;
 	pixelbuffer[j * xres + i].green = g;
 	pixelbuffer[j * xres + i].blue = b;
-	pixelbuffer[j * xres + i].alpha = a;
+	//pixelbuffer[j * xres + i].alpha = a;
+	//pixelbuffer[j * xres + i].z = z;
 	return GZ_SUCCESS;
 }
 
@@ -347,11 +354,11 @@ int GzRender::GzPut(int i, int j, GzIntensity r, GzIntensity g, GzIntensity b, G
 int GzRender::GzGet(int i, int j, GzIntensity *r, GzIntensity *g, GzIntensity *b, GzIntensity *a, GzDepth *z)
 {
 /* HW1.5 retrieve a pixel information from the pixel buffer */
-	r = &pixelbuffer[j * xres + i].red;
-	g = &pixelbuffer[j * xres + i].green;
-	b = &pixelbuffer[j * xres + i].blue;
-	a = &pixelbuffer[j * xres + i].alpha;
-	z = &pixelbuffer[j * xres + i].z;
+	*r = pixelbuffer[j * xres + i].red;
+	*g = pixelbuffer[j * xres + i].green;
+	*b = pixelbuffer[j * xres + i].blue;
+	*a = pixelbuffer[j * xres + i].alpha;
+	*z = pixelbuffer[j * xres + i].z;
 	return GZ_SUCCESS;
 }
 
@@ -393,7 +400,13 @@ int GzRender::GzFlushDisplay2FrameBuffer()
 	return GZ_SUCCESS;
 }
 
-
+/* HW6 */
+int GzRender::GzSetOffset(float x, float y, float w) {
+	offsetX = x;
+	offsetY = y;
+	weight = w;
+	return GZ_SUCCESS;
+}
 /***********************************************/
 /* HW2 methods: implement from here */
 
@@ -499,7 +512,7 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 	int minX, minY, maxX, maxY;
 	float *p0, *p1, *p2, *pL, *pR, *pG, *pB, *pNx, *pNy, *pNz, *pTu, *pTv;
 	GzColor color;
-	GzCoord norm0, norm1, norm2;
+	GzCoord* norm =  new GzCoord[3];
 	GzCoord* coord = new GzCoord[3];
 	GzTextureIndex* texture = new GzTextureIndex[3];
 	float* zPrime = new float[3];
@@ -518,31 +531,28 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 				if (vectorMultiply(Ximage[matlevel], coords[i], res, GZ_POSITION) == GZ_FAILURE) {
 					return GZ_FAILURE;
 				}
-				coords[i][X] = res[X];
-				coords[i][Y] = res[Y];
-				coords[i][Z] = res[Z];
+				coord[i][X] = res[X] - offsetX;
+				coord[i][Y] = res[Y] - offsetY;
+				coord[i][Z] = res[Z];
 			}
-			copyCoord(coords[0], coord[0]);
-			copyCoord(coords[1], coord[1]);
-			copyCoord(coords[2], coord[2]);
 
 			break;
 		}
 		case GZ_NORMAL:
 		{
 			/* HW4.3 calc shades*/
-			GzCoord* norm = (GzCoord*)valueList[i];
+			GzCoord* norms = (GzCoord*)valueList[i];
 			// apply Xn to norms
 			for (int i = 0; i < 3; i++) {
 				GzCoord res;
-				vectorMultiply(Xnorm[matlevel], norm[i], res, GZ_NORMAL);
+				vectorMultiply(Xnorm[matlevel], norms[i], res, GZ_NORMAL);
 				norm[i][X] = res[X];
 				norm[i][Y] = res[Y];
 				norm[i][Z] = res[Z];
 			}
-			copyCoord(norm[0], norm0);
+			/*copyCoord(norm[0], norm0);
 			copyCoord(norm[1], norm1);
-			copyCoord(norm[2], norm2);
+			copyCoord(norm[2], norm2);*/
 			break;
 		}
 		case GZ_TEXTURE_INDEX:
@@ -580,9 +590,9 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 	/* HW4 Gouraud interpolation */
 	if (interp_mode == GZ_COLOR) {
 		GzColor c0, c1, c2;
-		shadeColor(norm0, c0);
-		shadeColor(norm1, c1);
-		shadeColor(norm2, c2);
+		shadeColor(norm[0], c0);
+		shadeColor(norm[1], c1);
+		shadeColor(norm[2], c2);
 
 		GzCoord cd0 = { coord[0][X], coord[0][Y], c0[RED] };
 		GzCoord cd1 = { coord[1][X], coord[1][Y], c1[RED] };
@@ -610,25 +620,25 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 
 	/* HW4 Phong interpolation */
 	if (interp_mode == GZ_NORMALS) {
-		GzCoord cd0 = { coord[0][X], coord[0][Y], norm0[X] };
-		GzCoord cd1 = { coord[1][X], coord[1][Y], norm1[X] };
-		GzCoord cd2 = { coord[2][X], coord[2][Y], norm2[X] };
+		GzCoord cd0 = { coord[0][X], coord[0][Y], norm[0][X] };
+		GzCoord cd1 = { coord[1][X], coord[1][Y], norm[1][X] };
+		GzCoord cd2 = { coord[2][X], coord[2][Y], norm[2][X] };
 		//compute interpolated norm
 		// normX
 		minusCoord(cd0, cd1, e0);
 		minusCoord(cd0, cd2, e1);
 		pNx = computePlane(e0, e1, cd0);
 		// normY
-		cd0[2] = norm0[Y];
-		cd1[2] = norm1[Y];
-		cd2[2] = norm2[Y];
+		cd0[2] = norm[0][Y];
+		cd1[2] = norm[1][Y];
+		cd2[2] = norm[2][Y];
 		minusCoord(cd0, cd1, e0);
 		minusCoord(cd0, cd2, e1);
 		pNy = computePlane(e0, e1, cd0);
 		// normZ
-		cd0[2] = norm0[Z];
-		cd1[2] = norm1[Z];
-		cd2[2] = norm2[Z];
+		cd0[2] = norm[0][Z];
+		cd1[2] = norm[1][Z];
+		cd2[2] = norm[2][Z];
 		minusCoord(cd0, cd1, e0);
 		minusCoord(cd0, cd2, e1);
 		pNz = computePlane(e0, e1, cd0);
@@ -673,7 +683,7 @@ int GzRender::GzPutTriangle(int numParts, GzToken *nameList, GzPointer *valueLis
 	maxY = inBound(yres, 0, maxY);
 	// render
 	if (interp_mode == GZ_FLAT) {
-		shadeColor(norm0, color);
+		shadeColor(norm[0], color);
 	}
 	for (int j = minY; j <= maxY; j++) {
 		for (int i = minX; i <= maxX; i++) {
